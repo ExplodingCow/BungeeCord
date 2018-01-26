@@ -31,6 +31,8 @@ import net.md_5.bungee.api.connection.ProxiedPlayer;
 import net.md_5.bungee.event.EventBus;
 import net.md_5.bungee.event.EventHandler;
 import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.constructor.Constructor;
+import org.yaml.snakeyaml.introspector.PropertyUtils;
 
 /**
  * Class to manage bridging between plugin duties and implementation duties, for
@@ -44,18 +46,26 @@ public class PluginManager
     /*========================================================================*/
     private final ProxyServer proxy;
     /*========================================================================*/
-    private final Yaml yaml = new Yaml();
+    private final Yaml yaml;
     private final EventBus eventBus;
     private final Map<String, Plugin> plugins = new LinkedHashMap<>();
     private final Map<String, Command> commandMap = new HashMap<>();
     private Map<String, PluginDescription> toLoad = new HashMap<>();
-    private Multimap<Plugin, Command> commandsByPlugin = ArrayListMultimap.create();
-    private Multimap<Plugin, Listener> listenersByPlugin = ArrayListMultimap.create();
+    private final Multimap<Plugin, Command> commandsByPlugin = ArrayListMultimap.create();
+    private final Multimap<Plugin, Listener> listenersByPlugin = ArrayListMultimap.create();
 
     @SuppressWarnings("unchecked")
     public PluginManager(ProxyServer proxy)
     {
         this.proxy = proxy;
+
+        // Ignore unknown entries in the plugin descriptions
+        Constructor yamlConstructor = new Constructor();
+        PropertyUtils propertyUtils = yamlConstructor.getPropertyUtils();
+        propertyUtils.setSkipMissingProperties( true );
+        yamlConstructor.setPropertyUtils( propertyUtils );
+        yaml = new Yaml( yamlConstructor );
+
         eventBus = new EventBus( proxy.getLogger() );
     }
 
@@ -116,7 +126,7 @@ public class PluginManager
      */
     public boolean dispatchCommand(CommandSender sender, String commandLine, List<String> tabResults)
     {
-        String[] split = argsSplit.split( commandLine );
+        String[] split = argsSplit.split( commandLine, -1 );
         // Check for chat that only contains " "
         if ( split.length == 0 )
         {
@@ -137,7 +147,10 @@ public class PluginManager
         String permission = command.getPermission();
         if ( permission != null && !permission.isEmpty() && !sender.hasPermission( permission ) )
         {
-            sender.sendMessage( proxy.getTranslation( "no_permission" ) );
+            if ( !( command instanceof TabExecutor ) || tabResults == null )
+            {
+                sender.sendMessage( proxy.getTranslation( "no_permission" ) );
+            }
             return true;
         }
 
@@ -146,8 +159,15 @@ public class PluginManager
         {
             if ( tabResults == null )
             {
+                if ( proxy.getConfig().isLogCommands() )
+                {
+                    proxy.getLogger().log( Level.INFO, "{0} executed command: /{1}", new Object[]
+                    {
+                        sender.getName(), commandLine
+                    } );
+                }
                 command.execute( sender, args );
-            } else if ( command instanceof TabExecutor )
+            } else if ( commandLine.contains( " " ) && command instanceof TabExecutor )
             {
                 for ( String s : ( (TabExecutor) command ).onTabComplete( sender, args ) )
                 {
@@ -191,7 +211,7 @@ public class PluginManager
             PluginDescription plugin = entry.getValue();
             if ( !enablePlugin( pluginStatuses, new Stack<PluginDescription>(), plugin ) )
             {
-                ProxyServer.getInstance().getLogger().warning( "Failed to enable " + entry.getKey() );
+                ProxyServer.getInstance().getLogger().log( Level.WARNING, "Failed to enable {0}", entry.getKey() );
             }
         }
         toLoad.clear();
@@ -247,7 +267,7 @@ public class PluginManager
                         dependencyGraph.append( element.getName() ).append( " -> " );
                     }
                     dependencyGraph.append( plugin.getName() ).append( " -> " ).append( dependName );
-                    ProxyServer.getInstance().getLogger().log( Level.WARNING, "Circular dependency detected: " + dependencyGraph );
+                    ProxyServer.getInstance().getLogger().log( Level.WARNING, "Circular dependency detected: {0}", dependencyGraph );
                     status = false;
                 } else
                 {
@@ -327,6 +347,9 @@ public class PluginManager
                     try ( InputStream in = jar.getInputStream( pdf ) )
                     {
                         PluginDescription desc = yaml.loadAs( in, PluginDescription.class );
+                        Preconditions.checkNotNull( desc.getName(), "Plugin from %s has no name", file );
+                        Preconditions.checkNotNull( desc.getMain(), "Plugin from %s has no main", file );
+
                         desc.setFile( file );
                         toLoad.put( desc.getName(), desc );
                     }
@@ -354,10 +377,10 @@ public class PluginManager
         eventBus.post( event );
         event.postCall();
 
-        long elapsed = start - System.nanoTime();
-        if ( elapsed > 250000 )
+        long elapsed = System.nanoTime() - start;
+        if ( elapsed > 250000000 )
         {
-            ProxyServer.getInstance().getLogger().log( Level.WARNING, "Event {0} took more {1}ns to process!", new Object[]
+            ProxyServer.getInstance().getLogger().log( Level.WARNING, "Event {0} took {1}ns to process!", new Object[]
             {
                 event, elapsed
             } );
@@ -397,8 +420,6 @@ public class PluginManager
 
     /**
      * Unregister all of a Plugin's listener.
-     *
-     * @param plugin
      */
     public void unregisterListeners(Plugin plugin)
     {

@@ -7,16 +7,20 @@ import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.ServerChannel;
+import io.netty.channel.WriteBufferWaterMark;
+import io.netty.channel.epoll.Epoll;
+import io.netty.channel.epoll.EpollDatagramChannel;
 import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.epoll.EpollServerSocketChannel;
 import io.netty.channel.epoll.EpollSocketChannel;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.codec.haproxy.HAProxyMessageDecoder;
 import io.netty.handler.timeout.ReadTimeoutHandler;
 import io.netty.util.AttributeKey;
 import io.netty.util.internal.PlatformDependent;
-import java.net.InetSocketAddress;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
@@ -38,64 +42,56 @@ import net.md_5.bungee.protocol.Varint21LengthFieldPrepender;
 public class PipelineUtils
 {
 
-    public static final AttributeKey<ListenerInfo> LISTENER = new AttributeKey<>( "ListerInfo" );
-    public static final AttributeKey<UserConnection> USER = new AttributeKey<>( "User" );
-    public static final AttributeKey<BungeeServerInfo> TARGET = new AttributeKey<>( "Target" );
+    public static final AttributeKey<ListenerInfo> LISTENER = AttributeKey.valueOf( "ListerInfo" );
+    public static final AttributeKey<UserConnection> USER = AttributeKey.valueOf( "User" );
+    public static final AttributeKey<BungeeServerInfo> TARGET = AttributeKey.valueOf( "Target" );
     public static final ChannelInitializer<Channel> SERVER_CHILD = new ChannelInitializer<Channel>()
     {
         @Override
         protected void initChannel(Channel ch) throws Exception
         {
-            if ( BungeeCord.getInstance().getConnectionThrottle().throttle( ( (InetSocketAddress) ch.remoteAddress() ).getAddress() ) )
-            {
-                // TODO: Better throttle - we can't throttle this way if we want to maintain 1.7 compat!
-                // ch.close();
-                // return;
-            }
+            ListenerInfo listener = ch.attr( LISTENER ).get();
 
             BASE.initChannel( ch );
             ch.pipeline().addBefore( FRAME_DECODER, LEGACY_DECODER, new LegacyDecoder() );
             ch.pipeline().addAfter( FRAME_DECODER, PACKET_DECODER, new MinecraftDecoder( Protocol.HANDSHAKE, true, ProxyServer.getInstance().getProtocolVersion() ) );
             ch.pipeline().addAfter( FRAME_PREPENDER, PACKET_ENCODER, new MinecraftEncoder( Protocol.HANDSHAKE, true, ProxyServer.getInstance().getProtocolVersion() ) );
             ch.pipeline().addBefore( FRAME_PREPENDER, LEGACY_KICKER, new KickStringWriter() );
-            ch.pipeline().get( HandlerBoss.class ).setHandler( new InitialHandler( ProxyServer.getInstance(), ch.attr( LISTENER ).get() ) );
+            ch.pipeline().get( HandlerBoss.class ).setHandler( new InitialHandler( BungeeCord.getInstance(), listener ) );
+
+            if ( listener.isProxyProtocol() )
+            {
+                ch.pipeline().addFirst( new HAProxyMessageDecoder() );
+            }
         }
     };
     public static final Base BASE = new Base();
     private static final Varint21LengthFieldPrepender framePrepender = new Varint21LengthFieldPrepender();
-    public static String TIMEOUT_HANDLER = "timeout";
-    public static String PACKET_DECODER = "packet-decoder";
-    public static String PACKET_ENCODER = "packet-encoder";
-    public static String BOSS_HANDLER = "inbound-boss";
-    public static String ENCRYPT_HANDLER = "encrypt";
-    public static String DECRYPT_HANDLER = "decrypt";
-    public static String FRAME_DECODER = "frame-decoder";
-    public static String FRAME_PREPENDER = "frame-prepender";
-    public static String LEGACY_DECODER = "legacy-decoder";
-    public static String LEGACY_KICKER = "legacy-kick";
+    public static final String TIMEOUT_HANDLER = "timeout";
+    public static final String PACKET_DECODER = "packet-decoder";
+    public static final String PACKET_ENCODER = "packet-encoder";
+    public static final String BOSS_HANDLER = "inbound-boss";
+    public static final String ENCRYPT_HANDLER = "encrypt";
+    public static final String DECRYPT_HANDLER = "decrypt";
+    public static final String FRAME_DECODER = "frame-decoder";
+    public static final String FRAME_PREPENDER = "frame-prepender";
+    public static final String LEGACY_DECODER = "legacy-decoder";
+    public static final String LEGACY_KICKER = "legacy-kick";
 
     private static boolean epoll;
 
     static
     {
-        if ( !PlatformDependent.isWindows() )
+        if ( !PlatformDependent.isWindows() && Boolean.parseBoolean( System.getProperty( "bungee.epoll", "true" ) ) )
         {
             ProxyServer.getInstance().getLogger().info( "Not on Windows, attempting to use enhanced EpollEventLoop" );
-            EpollEventLoopGroup testGroup = null;
-            try
+
+            if ( epoll = Epoll.isAvailable() )
             {
-                testGroup = new EpollEventLoopGroup( 1 );
-                epoll = true;
                 ProxyServer.getInstance().getLogger().info( "Epoll is working, utilising it!" );
-            } catch ( Throwable t )
+            } else
             {
-                ProxyServer.getInstance().getLogger().log( Level.WARNING, "Event though Epoll should be supported, it is not working, falling back to NIO: {0}", Util.exception( t ) );
-            } finally
-            {
-                if ( testGroup != null )
-                {
-                    testGroup.shutdownGracefully();
-                }
+                ProxyServer.getInstance().getLogger().log( Level.WARNING, "Epoll is not working, falling back to NIO: {0}", Util.exception( Epoll.unavailabilityCause() ) );
             }
         }
     }
@@ -115,6 +111,15 @@ public class PipelineUtils
         return epoll ? EpollSocketChannel.class : NioSocketChannel.class;
     }
 
+    public static Class<? extends Channel> getDatagramChannel()
+    {
+        return epoll ? EpollDatagramChannel.class : NioDatagramChannel.class;
+    }
+
+    private static final int LOW_MARK = Integer.getInteger( "net.md_5.bungee.low_mark", 2 << 18 ); // 0.5 mb
+    private static final int HIGH_MARK = Integer.getInteger( "net.md_5.bungee.high_mark", 2 << 20 ); // 2 mb
+    private static final WriteBufferWaterMark MARK = new WriteBufferWaterMark( LOW_MARK, HIGH_MARK );
+
     public final static class Base extends ChannelInitializer<Channel>
     {
 
@@ -129,6 +134,7 @@ public class PipelineUtils
                 // IP_TOS is not supported (Windows XP / Windows Server 2003)
             }
             ch.config().setAllocator( PooledByteBufAllocator.DEFAULT );
+            ch.config().setWriteBufferWaterMark( MARK );
 
             ch.pipeline().addLast( TIMEOUT_HANDLER, new ReadTimeoutHandler( BungeeCord.getInstance().config.getTimeout(), TimeUnit.MILLISECONDS ) );
             ch.pipeline().addLast( FRAME_DECODER, new Varint21FrameDecoder() );
@@ -136,5 +142,5 @@ public class PipelineUtils
 
             ch.pipeline().addLast( BOSS_HANDLER, new HandlerBoss() );
         }
-    };
+    }
 }

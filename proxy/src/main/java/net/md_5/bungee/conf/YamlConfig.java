@@ -1,17 +1,20 @@
 package net.md_5.bungee.conf;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.logging.Level;
 import lombok.RequiredArgsConstructor;
@@ -21,13 +24,10 @@ import net.md_5.bungee.api.ProxyServer;
 import net.md_5.bungee.api.config.ConfigurationAdapter;
 import net.md_5.bungee.api.config.ListenerInfo;
 import net.md_5.bungee.api.config.ServerInfo;
-import net.md_5.bungee.api.tab.TabListHandler;
-import net.md_5.bungee.tab.Global;
-import net.md_5.bungee.tab.GlobalPing;
-import net.md_5.bungee.tab.ServerUnique;
 import net.md_5.bungee.util.CaseInsensitiveMap;
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.error.YAMLException;
 
 public class YamlConfig implements ConfigurationAdapter
 {
@@ -39,12 +39,18 @@ public class YamlConfig implements ConfigurationAdapter
     private enum DefaultTabList
     {
 
-        GLOBAL( Global.class ), GLOBAL_PING( GlobalPing.class ), SERVER( ServerUnique.class );
-        private final Class<? extends TabListHandler> clazz;
+        GLOBAL(), GLOBAL_PING(), SERVER();
     }
-    private Yaml yaml;
-    private Map config;
+    private final Yaml yaml;
+    private Map<String, Object> config;
     private final File file = new File( "config.yml" );
+
+    public YamlConfig()
+    {
+        DumperOptions options = new DumperOptions();
+        options.setDefaultFlowStyle( DumperOptions.FlowStyle.BLOCK );
+        yaml = new Yaml( options );
+    }
 
     @Override
     public void load()
@@ -52,21 +58,24 @@ public class YamlConfig implements ConfigurationAdapter
         try
         {
             file.createNewFile();
-            DumperOptions options = new DumperOptions();
-            options.setDefaultFlowStyle( DumperOptions.FlowStyle.BLOCK );
-            yaml = new Yaml( options );
 
             try ( InputStream is = new FileInputStream( file ) )
             {
-                config = (Map) yaml.load( is );
+                try
+                {
+                    config = (Map) yaml.load( is );
+                } catch ( YAMLException ex )
+                {
+                    throw new RuntimeException( "Invalid configuration encountered - this is a configuration error and NOT a bug! Please attempt to fix the error or see https://www.spigotmc.org/ for help.", ex );
+                }
             }
 
             if ( config == null )
             {
-                config = new CaseInsensitiveMap();
+                config = new CaseInsensitiveMap<>();
             } else
             {
-                config = new CaseInsensitiveMap( config );
+                config = new CaseInsensitiveMap<>( config );
             }
         } catch ( IOException ex )
         {
@@ -126,6 +135,34 @@ public class YamlConfig implements ConfigurationAdapter
         }
     }
 
+    @SuppressWarnings("unchecked")
+    private void set(String path, Object val, Map submap)
+    {
+        int index = path.indexOf( '.' );
+        if ( index == -1 )
+        {
+            if ( val == null )
+            {
+                submap.remove( path );
+            } else
+            {
+                submap.put( path, val );
+            }
+            save();
+        } else
+        {
+            String first = path.substring( 0, index );
+            String second = path.substring( index + 1, path.length() );
+            Map sub = (Map) submap.get( first );
+            if ( sub == null )
+            {
+                sub = new LinkedHashMap();
+                submap.put( first, sub );
+            }
+            set( second, val, sub );
+        }
+    }
+
     private void save()
     {
         try
@@ -182,6 +219,7 @@ public class YamlConfig implements ConfigurationAdapter
 
     @Override
     @SuppressWarnings("unchecked")
+    @SuppressFBWarnings("RCN_REDUNDANT_NULLCHECK_OF_NONNULL_VALUE")
     public Collection<ListenerInfo> getListeners()
     {
         Collection<Map<String, Object>> base = get( "listeners", (Collection) Arrays.asList( new Map[]
@@ -199,8 +237,6 @@ public class YamlConfig implements ConfigurationAdapter
             motd = ChatColor.translateAlternateColorCodes( '&', motd );
 
             int maxPlayers = get( "max_players", 1, val );
-            String defaultServer = get( "default_server", "lobby", val );
-            String fallbackServer = get( "fallback_server", defaultServer, val );
             boolean forceDefault = get( "force_default_server", false, val );
             String host = get( "host", "0.0.0.0:25577", val );
             int tabListSize = get( "tab_size", 60, val );
@@ -218,7 +254,32 @@ public class YamlConfig implements ConfigurationAdapter
             boolean query = get( "query_enabled", false, val );
             int queryPort = get( "query_port", 25577, val );
 
-            ListenerInfo info = new ListenerInfo( address, motd, maxPlayers, tabListSize, defaultServer, fallbackServer, forceDefault, forced, value.clazz, setLocalAddress, pingPassthrough, queryPort, query );
+            boolean proxyProtocol = get( "proxy_protocol", false, val );
+            List<String> serverPriority = new ArrayList<>( get( "priorities", Collections.EMPTY_LIST, val ) );
+
+            // Default server list migration
+            // TODO: Remove from submap
+            String defaultServer = get( "default_server", null, val );
+            String fallbackServer = get( "fallback_server", null, val );
+            if ( defaultServer != null )
+            {
+                serverPriority.add( defaultServer );
+                set( "default_server", null, val );
+            }
+            if ( fallbackServer != null )
+            {
+                serverPriority.add( fallbackServer );
+                set( "fallback_server", null, val );
+            }
+
+            // Add defaults if required
+            if ( serverPriority.isEmpty() )
+            {
+                serverPriority.add( "lobby" );
+            }
+            set( "priorities", serverPriority, val );
+
+            ListenerInfo info = new ListenerInfo( address, motd, maxPlayers, tabListSize, serverPriority, forceDefault, forced, value.toString(), setLocalAddress, pingPassthrough, queryPort, query, proxyProtocol );
             ret.add( info );
         }
 
@@ -245,6 +306,7 @@ public class YamlConfig implements ConfigurationAdapter
     @SuppressWarnings("unchecked")
     public Collection<String> getPermissions(String group)
     {
-        return get( "permissions." + group, Collections.EMPTY_LIST );
+        Collection<String> permissions = get( "permissions." + group, null );
+        return ( permissions == null ) ? Collections.EMPTY_SET : permissions;
     }
 }

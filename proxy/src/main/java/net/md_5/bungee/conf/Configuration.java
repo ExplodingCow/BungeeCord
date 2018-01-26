@@ -47,11 +47,17 @@ public class Configuration implements ProxyConfig
      * Should we check minecraft.net auth.
      */
     private boolean onlineMode = true;
+    /**
+     * Whether we log proxy commands to the proxy log
+     */
+    private boolean logCommands;
     private int playerLimit = -1;
     private Collection<String> disabledCommands;
     private int throttle = 4000;
-    private boolean ipFoward;
+    private boolean ipForward;
     private Favicon favicon;
+    private int compressionThreshold = 256;
+    private boolean preventProxyConnections;
 
     public void load()
     {
@@ -74,9 +80,12 @@ public class Configuration implements ProxyConfig
         timeout = adapter.getInt( "timeout", timeout );
         uuid = adapter.getString( "stats", uuid );
         onlineMode = adapter.getBoolean( "online_mode", onlineMode );
+        logCommands = adapter.getBoolean( "log_commands", logCommands );
         playerLimit = adapter.getInt( "player_limit", playerLimit );
         throttle = adapter.getInt( "connection_throttle", throttle );
-        ipFoward = adapter.getBoolean( "ip_forward", ipFoward );
+        ipForward = adapter.getBoolean( "ip_forward", ipForward );
+        compressionThreshold = adapter.getInt( "network_compression_threshold", compressionThreshold );
+        preventProxyConnections = adapter.getBoolean( "prevent_proxy_connections", preventProxyConnections );
 
         disabledCommands = new CaseInsensitiveSet( (Collection<String>) adapter.getList( "disabled_commands", Arrays.asList( "disabledcommandhere" ) ) );
 
@@ -93,7 +102,7 @@ public class Configuration implements ProxyConfig
             for ( ServerInfo oldServer : servers.values() )
             {
                 // Don't allow servers to be removed
-                Preconditions.checkArgument( newServers.containsValue( oldServer ), "Server %s removed on reload!", oldServer.getName() );
+                Preconditions.checkArgument( newServers.containsKey( oldServer.getName() ), "Server %s removed on reload!", oldServer.getName() );
             }
 
             // Add new servers
@@ -108,8 +117,11 @@ public class Configuration implements ProxyConfig
 
         for ( ListenerInfo listener : listeners )
         {
-            Preconditions.checkArgument( servers.containsKey( listener.getDefaultServer() ), "Default server %s is not defined", listener.getDefaultServer() );
-            Preconditions.checkArgument( servers.containsKey( listener.getFallbackServer() ), "Fallback server %s is not defined", listener.getFallbackServer() );
+            for ( int i = 0; i < listener.getServerPriority().size(); i++ )
+            {
+                String server = listener.getServerPriority().get( i );
+                Preconditions.checkArgument( servers.containsKey( server ), "Server %s (priority %s) is not defined", server, i );
+            }
             for ( String server : listener.getForcedHosts().values() )
             {
                 if ( !servers.containsKey( server ) )
@@ -120,12 +132,14 @@ public class Configuration implements ProxyConfig
         }
     }
 
+    @Override
     @Deprecated
     public String getFavicon()
     {
         return getFaviconObject().getEncoded();
     }
 
+    @Override
     public Favicon getFaviconObject()
     {
         return favicon;

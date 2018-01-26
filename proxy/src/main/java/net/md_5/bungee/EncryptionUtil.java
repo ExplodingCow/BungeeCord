@@ -14,6 +14,10 @@ import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import lombok.Getter;
+import net.md_5.bungee.jni.NativeCode;
+import net.md_5.bungee.jni.cipher.BungeeCipher;
+import net.md_5.bungee.jni.cipher.JavaCipher;
+import net.md_5.bungee.jni.cipher.NativeCipher;
 import net.md_5.bungee.protocol.packet.EncryptionResponse;
 import net.md_5.bungee.protocol.packet.EncryptionRequest;
 
@@ -24,15 +28,18 @@ public class EncryptionUtil
 {
 
     private static final Random random = new Random();
-    public static KeyPair keys;
+    public static final KeyPair keys;
     @Getter
-    private static SecretKey secret = new SecretKeySpec( new byte[ 16 ], "AES" );
+    private static final SecretKey secret = new SecretKeySpec( new byte[ 16 ], "AES" );
+    public static final NativeCode<BungeeCipher> nativeFactory = new NativeCode<>( "native-cipher", JavaCipher.class, NativeCipher.class );
 
     static
     {
         try
         {
-            keys = KeyPairGenerator.getInstance( "RSA" ).generateKeyPair();
+            KeyPairGenerator generator = KeyPairGenerator.getInstance( "RSA" );
+            generator.initialize( 1024 );
+            keys = generator.generateKeyPair();
         } catch ( NoSuchAlgorithmException ex )
         {
             throw new ExceptionInInitializerError( ex );
@@ -65,14 +72,7 @@ public class EncryptionUtil
 
     public static BungeeCipher getCipher(boolean forEncryption, SecretKey shared) throws GeneralSecurityException
     {
-        BungeeCipher cipher;
-        if ( NativeCipher.isLoaded() )
-        {
-            cipher = new NativeCipher();
-        } else
-        {
-            cipher = new FallbackCipher();
-        }
+        BungeeCipher cipher = nativeFactory.newInstance();
 
         cipher.init( forEncryption, shared );
         return cipher;

@@ -27,8 +27,9 @@ public class HttpClient
 {
 
     public static final int TIMEOUT = 5000;
-    private static final Cache<String, InetAddress> addressCache = CacheBuilder.newBuilder().expireAfterWrite( 5, TimeUnit.MINUTES ).build();
+    private static final Cache<String, InetAddress> addressCache = CacheBuilder.newBuilder().expireAfterWrite( 1, TimeUnit.MINUTES ).build();
 
+    @SuppressWarnings("UnusedAssignment")
     public static void get(String url, EventLoop eventLoop, final Callback<String> callback)
     {
         Preconditions.checkNotNull( url, "url" );
@@ -67,8 +68,8 @@ public class HttpClient
                 callback.done( null, ex );
                 return;
             }
+            addressCache.put( uri.getHost(), inetHost );
         }
-        addressCache.put( uri.getHost(), inetHost );
 
         ChannelFutureListener future = new ChannelFutureListener()
         {
@@ -85,12 +86,13 @@ public class HttpClient
                     future.channel().writeAndFlush( request );
                 } else
                 {
+                    addressCache.invalidate( uri.getHost() );
                     callback.done( null, future.cause() );
                 }
             }
         };
 
-        new Bootstrap().channel( PipelineUtils.getChannel() ).group( eventLoop ).handler( new HttpInitializer( callback, ssl ) ).
+        new Bootstrap().channel( PipelineUtils.getChannel() ).group( eventLoop ).handler( new HttpInitializer( callback, ssl, uri.getHost(), port ) ).
                 option( ChannelOption.CONNECT_TIMEOUT_MILLIS, TIMEOUT ).remoteAddress( inetHost, port ).connect().addListener( future );
     }
 }

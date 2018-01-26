@@ -1,5 +1,6 @@
 package net.md_5.bungee;
 
+import com.google.common.base.Objects;
 import com.google.common.base.Preconditions;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelFuture;
@@ -11,7 +12,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedList;
-import java.util.Objects;
 import java.util.Queue;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -31,7 +31,10 @@ import net.md_5.bungee.protocol.DefinedPacket;
 import net.md_5.bungee.protocol.packet.PluginMessage;
 
 @RequiredArgsConstructor
-@ToString(of = { "name", "address", "restricted" })
+@ToString(of =
+{
+    "name", "address", "restricted"
+})
 public class BungeeServerInfo implements ServerInfo
 {
 
@@ -63,7 +66,7 @@ public class BungeeServerInfo implements ServerInfo
     @Override
     public Collection<ProxiedPlayer> getPlayers()
     {
-        return Collections.unmodifiableCollection( new HashSet( players ) );
+        return Collections.unmodifiableCollection( new HashSet<>( players ) );
     }
 
     @Override
@@ -76,7 +79,7 @@ public class BungeeServerInfo implements ServerInfo
     @Override
     public boolean equals(Object obj)
     {
-        return ( obj instanceof ServerInfo ) && Objects.equals( getAddress(), ( (ServerInfo) obj ).getAddress() );
+        return ( obj instanceof ServerInfo ) && Objects.equal( getAddress(), ( (ServerInfo) obj ).getAddress() );
     }
 
     @Override
@@ -85,9 +88,15 @@ public class BungeeServerInfo implements ServerInfo
         return address.hashCode();
     }
 
-    // TODO: Don't like this method
     @Override
     public void sendData(String channel, byte[] data)
+    {
+        sendData( channel, data, true );
+    }
+
+    // TODO: Don't like this method
+    @Override
+    public boolean sendData(String channel, byte[] data, boolean queue)
     {
         Preconditions.checkNotNull( channel, "channel" );
         Preconditions.checkNotNull( data, "data" );
@@ -98,10 +107,12 @@ public class BungeeServerInfo implements ServerInfo
             if ( server != null )
             {
                 server.sendData( channel, data );
-            } else
+                return true;
+            } else if ( queue )
             {
-                packetQueue.add( new PluginMessage( channel, data ) );
+                packetQueue.add( new PluginMessage( channel, data, false ) );
             }
+            return false;
         }
     }
 

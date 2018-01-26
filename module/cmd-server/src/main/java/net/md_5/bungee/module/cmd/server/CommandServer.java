@@ -31,36 +31,41 @@ public class CommandServer extends Command implements TabExecutor
     @Override
     public void execute(CommandSender sender, String[] args)
     {
-        if ( !( sender instanceof ProxiedPlayer ) )
-        {
-            return;
-        }
-        ProxiedPlayer player = (ProxiedPlayer) sender;
         Map<String, ServerInfo> servers = ProxyServer.getInstance().getServers();
         if ( args.length == 0 )
         {
-            player.sendMessage( ProxyServer.getInstance().getTranslation( "current_server" ) + player.getServer().getInfo().getName() );
+            if ( sender instanceof ProxiedPlayer )
+            {
+                sender.sendMessage( ProxyServer.getInstance().getTranslation( "current_server", ( (ProxiedPlayer) sender ).getServer().getInfo().getName() ) );
+            }
+
             TextComponent serverList = new TextComponent( ProxyServer.getInstance().getTranslation( "server_list" ) );
             serverList.setColor( ChatColor.GOLD );
             boolean first = true;
             for ( ServerInfo server : servers.values() )
             {
-                if ( server.canAccess( player ) )
+                if ( server.canAccess( sender ) )
                 {
                     TextComponent serverTextComponent = new TextComponent( first ? server.getName() : ", " + server.getName() );
                     int count = server.getPlayers().size();
                     serverTextComponent.setHoverEvent( new HoverEvent( HoverEvent.Action.SHOW_TEXT,
-                            new ComponentBuilder( count + (count == 1 ? " player" : " players") + "\n")
-                                    .append( "Click to connect to the server" ).italic( true )
-                                    .create() ) );
+                            new ComponentBuilder( count + ( count == 1 ? " player" : " players" ) + "\n" )
+                            .append( "Click to connect to the server" ).italic( true )
+                            .create() ) );
                     serverTextComponent.setClickEvent( new ClickEvent( ClickEvent.Action.RUN_COMMAND, "/server " + server.getName() ) );
                     serverList.addExtra( serverTextComponent );
                     first = false;
                 }
             }
-            player.sendMessage( serverList );
+            sender.sendMessage( serverList );
         } else
         {
+            if ( !( sender instanceof ProxiedPlayer ) )
+            {
+                return;
+            }
+            ProxiedPlayer player = (ProxiedPlayer) sender;
+
             ServerInfo server = servers.get( args[0] );
             if ( server == null )
             {
@@ -76,14 +81,16 @@ public class CommandServer extends Command implements TabExecutor
     }
 
     @Override
-    public Iterable<String> onTabComplete(final CommandSender sender, String[] args)
+    public Iterable<String> onTabComplete(final CommandSender sender, final String[] args)
     {
-        return ( args.length != 0 ) ? Collections.EMPTY_LIST : Iterables.transform( Iterables.filter( ProxyServer.getInstance().getServers().values(), new Predicate<ServerInfo>()
+        return ( args.length > 1 ) ? Collections.EMPTY_LIST : Iterables.transform( Iterables.filter( ProxyServer.getInstance().getServers().values(), new Predicate<ServerInfo>()
         {
+            private final String lower = ( args.length == 0 ) ? "" : args[0].toLowerCase();
+
             @Override
             public boolean apply(ServerInfo input)
             {
-                return input.canAccess( sender );
+                return input.getName().toLowerCase().startsWith( lower ) && input.canAccess( sender );
             }
         } ), new Function<ServerInfo, String>()
         {

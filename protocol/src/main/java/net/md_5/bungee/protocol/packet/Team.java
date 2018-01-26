@@ -25,18 +25,16 @@ public class Team extends DefinedPacket
     private String prefix;
     private String suffix;
     private String nameTagVisibility;
+    private String collisionRule;
     private byte color;
     private byte friendlyFire;
     private String[] players;
 
     /**
      * Packet to destroy a team.
-     *
-     * @param name
      */
     public Team(String name)
     {
-        this();
         this.name = name;
         this.mode = 1;
     }
@@ -52,15 +50,16 @@ public class Team extends DefinedPacket
             prefix = readString( buf );
             suffix = readString( buf );
             friendlyFire = buf.readByte();
-            if ( protocolVersion >= ProtocolConstants.MINECRAFT_14_11_a )
+            nameTagVisibility = readString( buf );
+            if ( protocolVersion >= ProtocolConstants.MINECRAFT_1_9 )
             {
-                nameTagVisibility = readString( buf );
-                color = buf.readByte();
+                collisionRule = readString( buf );
             }
+            color = buf.readByte();
         }
         if ( mode == 0 || mode == 3 || mode == 4 )
         {
-            int len = ( protocolVersion >= ProtocolConstants.MINECRAFT_14_11_a ) ? readVarInt( buf ) : buf.readShort();
+            int len = readVarInt( buf );
             players = new String[ len ];
             for ( int i = 0; i < len; i++ )
             {
@@ -80,21 +79,16 @@ public class Team extends DefinedPacket
             writeString( prefix, buf );
             writeString( suffix, buf );
             buf.writeByte( friendlyFire );
-            if ( protocolVersion >= ProtocolConstants.MINECRAFT_14_11_a )
+            writeString( nameTagVisibility, buf );
+            if ( protocolVersion >= ProtocolConstants.MINECRAFT_1_9 )
             {
-                writeString( nameTagVisibility, buf );
-                buf.writeByte( color );
+                writeString( collisionRule, buf );
             }
+            buf.writeByte( color );
         }
         if ( mode == 0 || mode == 3 || mode == 4 )
         {
-            if ( protocolVersion >= ProtocolConstants.MINECRAFT_14_11_a )
-            {
-                writeVarInt( players.length, buf );
-            } else
-            {
-                buf.writeShort( players.length );
-            }
+            writeVarInt( players.length, buf );
             for ( String player : players )
             {
                 writeString( player, buf );

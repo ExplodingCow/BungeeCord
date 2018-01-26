@@ -4,6 +4,7 @@ import net.md_5.bungee.api.ChatColor;
 import net.md_5.bungee.api.chat.BaseComponent;
 import net.md_5.bungee.api.chat.ClickEvent;
 import net.md_5.bungee.api.chat.ComponentBuilder;
+import net.md_5.bungee.api.chat.HoverEvent;
 import net.md_5.bungee.api.chat.TextComponent;
 import net.md_5.bungee.api.chat.TranslatableComponent;
 import org.junit.Assert;
@@ -11,6 +12,32 @@ import org.junit.Test;
 
 public class ComponentsTest
 {
+
+    @Test
+    public void testBuilderClone()
+    {
+        ComponentBuilder builder = new ComponentBuilder("Hel").color(ChatColor.RED).append("lo").color(ChatColor.DARK_RED);
+        ComponentBuilder cloned = new ComponentBuilder( builder );
+
+        Assert.assertEquals( TextComponent.toLegacyText( builder.create() ), TextComponent.toLegacyText( cloned.create() ) );
+    }
+
+    @Test
+    public void testBuilderAppend()
+    {
+        ClickEvent clickEvent = new ClickEvent( ClickEvent.Action.RUN_COMMAND, "/help " );
+        HoverEvent hoverEvent = new HoverEvent( HoverEvent.Action.SHOW_TEXT, new ComponentBuilder( "Hello world" ).create() );
+
+        ComponentBuilder builder = new ComponentBuilder( "Hello " ).color( ChatColor.YELLOW );
+        builder.append( new ComponentBuilder( "world!" ).color( ChatColor.GREEN ).event( hoverEvent ).event( clickEvent ).create() );
+
+        BaseComponent[] components = builder.create();
+
+        Assert.assertEquals( components[1].getHoverEvent(), hoverEvent );
+        Assert.assertEquals( components[1].getClickEvent(), clickEvent );
+        Assert.assertEquals( "Hello world!", BaseComponent.toPlainText( components ) );
+        Assert.assertEquals( ChatColor.YELLOW + "Hello " + ChatColor.GREEN + "world!", BaseComponent.toLegacyText( components ) );
+    }
 
     @Test
     public void testBasicComponent()
@@ -78,6 +105,48 @@ public class ComponentsTest
         Assert.assertEquals( "Hello World!", BaseComponent.toPlainText( components ) );
         Assert.assertEquals( ChatColor.RED + "Hello " + ChatColor.BLUE + ChatColor.BOLD
                 + "World" + ChatColor.YELLOW + ChatColor.BOLD + "!", BaseComponent.toLegacyText( components ) );
+    }
+
+    @Test
+    public void testBuilderReset()
+    {
+        BaseComponent[] components = new ComponentBuilder( "Hello " ).color( ChatColor.RED )
+                .append( "World" ).reset().create();
+
+        Assert.assertEquals( components[0].getColor(), ChatColor.RED );
+        Assert.assertEquals( components[1].getColor(), ChatColor.WHITE );
+    }
+
+    @Test
+    public void testBuilderFormatRetention()
+    {
+        BaseComponent[] noneRetention = new ComponentBuilder( "Hello " ).color( ChatColor.RED )
+                .append( "World", ComponentBuilder.FormatRetention.NONE ).create();
+
+        Assert.assertEquals( noneRetention[0].getColor(), ChatColor.RED );
+        Assert.assertEquals( noneRetention[1].getColor(), ChatColor.WHITE );
+
+        HoverEvent testEvent = new HoverEvent( HoverEvent.Action.SHOW_TEXT, new ComponentBuilder( "test" ).create() );
+
+        BaseComponent[] formattingRetention = new ComponentBuilder( "Hello " ).color( ChatColor.RED )
+                .event( testEvent ).append( "World", ComponentBuilder.FormatRetention.FORMATTING ).create();
+
+        Assert.assertEquals( formattingRetention[0].getColor(), ChatColor.RED );
+        Assert.assertEquals( formattingRetention[0].getHoverEvent(), testEvent );
+        Assert.assertEquals( formattingRetention[1].getColor(), ChatColor.RED );
+        Assert.assertNull( formattingRetention[1].getHoverEvent() );
+
+        ClickEvent testClickEvent = new ClickEvent( ClickEvent.Action.OPEN_URL, "http://www.example.com" );
+
+        BaseComponent[] eventRetention = new ComponentBuilder( "Hello " ).color( ChatColor.RED )
+                .event( testEvent ).event( testClickEvent ).append( "World", ComponentBuilder.FormatRetention.EVENTS ).create();
+
+        Assert.assertEquals( eventRetention[0].getColor(), ChatColor.RED );
+        Assert.assertEquals( eventRetention[0].getHoverEvent(), testEvent );
+        Assert.assertEquals( eventRetention[0].getClickEvent(), testClickEvent );
+        Assert.assertEquals( eventRetention[1].getColor(), ChatColor.WHITE );
+        Assert.assertEquals( eventRetention[1].getHoverEvent(), testEvent );
+        Assert.assertEquals( eventRetention[1].getClickEvent(), testClickEvent );
     }
 
     @Test(expected = IllegalArgumentException.class)

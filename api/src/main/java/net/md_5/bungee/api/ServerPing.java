@@ -1,16 +1,23 @@
 package net.md_5.bungee.api;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 import net.md_5.bungee.Util;
+import net.md_5.bungee.api.chat.BaseComponent;
+import net.md_5.bungee.api.chat.TextComponent;
 
 /**
  * Represents the standard list data returned by opening a server in the
  * Minecraft client server list, or hitting it with a packet 0xFE.
  */
 @Data
+@ToString(exclude = "favicon")
 @NoArgsConstructor
 @AllArgsConstructor
 public class ServerPing
@@ -71,13 +78,41 @@ public class ServerPing
             return uniqueId.toString().replaceAll( "-", "" );
         }
     }
-    private String description;
+
+    private BaseComponent description;
     private Favicon favicon;
+
+    @Data
+    public static class ModInfo
+    {
+
+        private String type = "FML";
+        private List<ModItem> modList = new ArrayList<>();
+    }
+
+    @Data
+    @AllArgsConstructor
+    public static class ModItem
+    {
+
+        private String modid;
+        private String version;
+    }
+
+    // Right now, we don't get the mods from the user, so we just use a stock ModInfo object to
+    // create the server ping. Vanilla clients will ignore this.
+    private final ModInfo modinfo = new ModInfo();
 
     @Deprecated
     public ServerPing(Protocol version, Players players, String description, String favicon)
     {
-        this( version, players, description, favicon == null ? null : Favicon.create( favicon ) );
+        this( version, players, new TextComponent( TextComponent.fromLegacyText( description ) ), favicon == null ? null : Favicon.create( favicon ) );
+    }
+
+    @Deprecated
+    public ServerPing(Protocol version, Players players, String description, Favicon favicon)
+    {
+        this( version, players, new TextComponent( TextComponent.fromLegacyText( description ) ), favicon );
     }
 
     @Deprecated
@@ -100,5 +135,27 @@ public class ServerPing
     public void setFavicon(Favicon favicon)
     {
         this.favicon = favicon;
+    }
+
+    @Deprecated
+    public void setDescription(String description)
+    {
+        this.description = new TextComponent( TextComponent.fromLegacyText( description ) );
+    }
+
+    @Deprecated
+    public String getDescription()
+    {
+        return BaseComponent.toLegacyText( description );
+    }
+
+    public void setDescriptionComponent(BaseComponent description)
+    {
+        this.description = description;
+    }
+
+    public BaseComponent getDescriptionComponent()
+    {
+        return description;
     }
 }
